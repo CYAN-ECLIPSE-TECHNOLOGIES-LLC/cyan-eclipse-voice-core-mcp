@@ -74,7 +74,7 @@ State persists in `data/state.json` beside the server (override with `ECLIPSE_VO
 ## Roadmap (per spec)
 
 - **V0** — this core + the Eclipse Trunk (Twilio) fixture adapter.
-- **V1** — first live: owner's Twilio account + one registered dogfood number; DNC/window datasets and the recording-consent matrix through counsel review.
+- **V1** — first live: owner's Twilio account + one registered first-party number; DNC/window datasets and the recording-consent matrix through counsel review.
 - **V2** — Uplink (Telnyx) + Wavelength (Bandwidth) wraps; Stratum-2 phone-system adapters feeding the Customer Graph.
 - **V3** — Eclipse Ward, the AI voice-agent governor. CETech places no AI outbound calls and enables no AI answering in v1 (spec decision 3).
 
