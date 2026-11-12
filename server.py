@@ -173,136 +173,272 @@ def t_receipt_list(state, args):
 TOOLS = {
     "consent_check": (
         t_consent_check,
-        "T0. The single consent door (spec 5): (subject, channel, "
-        "scope, at_time) -> ALLOW/DENY + reason + consent_record_id, "
-        "with DNC and window sub-verdicts. A record without "
-        "provenance is void and never authorizes.",
-        {"subject": {"type": "string"}, "channel": {"type": "string"},
-         "scope": {"type": "string"}, "at_time": {"type": "string"}},
+        "Decide whether one subject may be contacted on one channel "
+        "for one scope right now — the single consent verdict every "
+        "telephony adapter must use. Use before any call or text; "
+        "use send_evaluate instead when a send also needs mandate "
+        "and number checks. Read-only: writes nothing, no receipt. "
+        "The verdict layers, in order: a governing provenance-bearing "
+        "consent record (a record without provenance is void and "
+        "never authorizes; broader scopes do not imply narrower ones "
+        "— the governing record is matched by scope rank), DNC "
+        "overlay (the internal list binds every scope; national/state "
+        "lists bind marketing and conversational; stale DNC data "
+        "denies marketing checks), and the calling window for "
+        "marketing/conversational scopes (an unknown timezone counts "
+        "as outside and denies). Channels are voice, sms, voice+sms; "
+        "scopes are transactional, conversational, marketing. "
+        "at_time (ISO 8601) defaults to now. Returns the verdict "
+        "object: decision ALLOW or DENY, a machine-readable reason, "
+        "consent_record_id when a record governs, and dnc_check / "
+        "window_check sub-verdicts when those layers ran.",
+        {"subject": {"type": "string", "description": "Who would be contacted — the identifier consent records are keyed by (phone number or subject id, as recorded)."},
+         "channel": {"type": "string", "description": "voice, sms, or voice+sms. A voice+sms record covers either single channel."},
+         "scope": {"type": "string", "description": "transactional, conversational, or marketing — the purpose class of the contact."},
+         "at_time": {"type": "string", "description": "ISO 8601 evaluation time for window and DNC-freshness checks; defaults to now."}},
         ["subject", "channel", "scope"]),
     "consent_record_write": (
         t_consent_record_write,
-        "T1. Write a NEW consent record. Provenance is REQUIRED — "
-        "a record without it is void, refused, and receipted as a "
-        "violation (spec 5.2). Never edits history.",
-        {"subject": {"type": "string"}, "channel": {"type": "string"},
-         "scope": {"type": "string"}, "purpose": {"type": "string"},
-         "source": {"type": "string"},
-         "captured_at": {"type": "string"},
-         "provenance": {"type": "object"},
-         "method_detail": {"type": "object"},
-         "jurisdiction_hint": {"type": "string"},
-         "recorded_by": {"type": "string"}},
+        "Write a NEW consent record into the Consent Registry. Use "
+        "when consent was captured from a person through a real "
+        "channel; use consent_revoke to end consent and "
+        "consent_check to query it. Mutating and persistent: stores "
+        "the record as active and appends a hash-chained receipt. "
+        "Provenance is mandatory — the provenance object must carry "
+        "at least one non-empty key among url, document_ref, "
+        "call_ref, form_id; a write without provenance is refused, "
+        "nothing is stored, and the attempt is receipted as a "
+        "violation. Records are never edited after writing: a "
+        "duplicate (same subject, channel, scope, captured_at, "
+        "source) is refused as already existing. channel must be "
+        "voice, sms, or voice+sms; scope transactional, "
+        "conversational, or marketing; source one of web_form, "
+        "signed_doc, recorded_call, in_person, platform_import, "
+        "other. Returns {consent, receipt_seq} with the assigned "
+        "consent_id.",
+        {"subject": {"type": "string", "description": "Who consented — the identifier future consent_check calls will use."},
+         "channel": {"type": "string", "description": "voice, sms, or voice+sms."},
+         "scope": {"type": "string", "description": "transactional, conversational, or marketing."},
+         "purpose": {"type": "string", "description": "The purpose as captured, verbatim capture context. Required."},
+         "source": {"type": "string", "description": "Capture channel: web_form, signed_doc, recorded_call, in_person, platform_import, or other. Required."},
+         "captured_at": {"type": "string", "description": "ISO 8601 time consent was captured. Required and must parse."},
+         "provenance": {"type": "object", "description": "Evidence of capture; must include at least one non-empty of url, document_ref, call_ref, form_id or the write is refused as void."},
+         "method_detail": {"type": "object", "description": "How capture happened (form text shown, script version), stored as supplied."},
+         "jurisdiction_hint": {"type": "string", "description": "Jurisdiction used for calling-window evaluation on later checks."},
+         "recorded_by": {"type": "string", "description": "Who or what recorded the consent; defaults to 'operator' in the record history."}},
         ["subject", "channel", "scope", "purpose", "source",
          "captured_at", "provenance"]),
     "consent_revoke": (
         t_consent_revoke,
-        "T1. Revoke consent (one consent_id, or every active record "
-        "for a subject). Total and one-way (spec 5.3): re-consent "
-        "requires a new record with new provenance. Receipted.",
-        {"consent_id": {"type": "string"},
-         "subject": {"type": "string"},
-         "revocation_source": {"type": "string"}},
+        "Revoke consent — one record by consent_id, or every active "
+        "record for a subject when consent_id is omitted. Use the "
+        "moment a person opts out, by any channel; use "
+        "consent_record_write for new consent and consent_history "
+        "to inspect the trail. Mutating, persistent, and receipted. "
+        "Revocation is total and one-way: there is no un-revoke, "
+        "and re-consent requires a brand-new record with new "
+        "provenance via consent_record_write. Because adapters hold "
+        "no consent copies, the revocation takes effect at the next "
+        "consent_check everywhere. revocation_source is required "
+        "and must be one of opt_out_keyword, voice_request, "
+        "dnc_match, owner_action, carrier_signal. Returns "
+        "{revoked, receipt_seq} listing the consent_ids revoked.",
+        {"consent_id": {"type": "string", "description": "Revoke exactly this record; omit to revoke all active records for subject."},
+         "subject": {"type": "string", "description": "Revoke every active record for this subject (used when consent_id is omitted)."},
+         "revocation_source": {"type": "string", "description": "opt_out_keyword, voice_request, dnc_match, owner_action, or carrier_signal. Required."}},
         ["revocation_source"]),
     "consent_history": (
         t_consent_history,
-        "T0. Full consent trail for a subject: records with their "
-        "append-only status history.",
-        {"subject": {"type": "string"}}, ["subject"]),
+        "Read the full consent trail for one subject: every record "
+        "ever written for them, each with its append-only status "
+        "history (recorded, revoked events). Use to audit a "
+        "subject's consent before a send decision or an opt-out "
+        "dispute; use consent_check when you need a verdict rather "
+        "than the trail. Read-only. Records are returned sorted by "
+        "captured_at, including revoked ones — history is never "
+        "rewritten. Returns {subject, records, count}.",
+        {"subject": {"type": "string", "description": "Subject identifier exactly as recorded by consent_record_write."}}, ["subject"]),
     "dnc_status": (
         t_dnc_status,
-        "T0. DNC overlay datasets: versions, provenance, freshness; "
-        "optionally one subject's match state (spec 5.4).",
-        {"subject": {"type": "string"}, "at_time": {"type": "string"}},
+        "Read the Do-Not-Contact overlay datasets loaded in this "
+        "registry — each list's id, kind, version, provenance, and "
+        "freshness — and, when subject is given, whether that "
+        "subject matches a list. Use to check DNC data health "
+        "before relying on marketing consent checks; use "
+        "consent_check for a full contact verdict (it applies DNC "
+        "as one layer). Read-only. There is deliberately no tool "
+        "that removes a subject from a DNC list. at_time (ISO 8601, "
+        "default now) drives the freshness evaluation. Returns the "
+        "dataset status object, with a subject match section when "
+        "subject is supplied.",
+        {"subject": {"type": "string", "description": "Optional subject identifier to test against the loaded lists."},
+         "at_time": {"type": "string", "description": "ISO 8601 evaluation time for list freshness; defaults to now."}},
         []),
     "window_check": (
         t_window_check,
-        "T0. Calling-window evaluation from jurisdiction rule data "
-        "(spec 5.4): inside/outside + the rule cited. Unknown "
-        "timezone = outside = DENY.",
-        {"jurisdiction": {"type": "string"},
-         "channel": {"type": "string"}, "scope": {"type": "string"},
-         "at_time": {"type": "string"}},
+        "Evaluate whether contacting at at_time falls inside the "
+        "legal calling window for a jurisdiction, channel, and "
+        "scope, from the registry's versioned jurisdiction rule "
+        "data. Use for a window-only question; use consent_check "
+        "for the full verdict (it runs this check itself for "
+        "marketing and conversational scopes). Read-only. An "
+        "unknown jurisdiction or timezone is treated as outside "
+        "the window — the safe answer is the returned answer, with "
+        "reason unknown_timezone. jurisdiction may be omitted, in "
+        "which case no rule can match and the result is outside. "
+        "Returns {inside, reason, ...} naming the rule evaluated.",
+        {"jurisdiction": {"type": "string", "description": "Jurisdiction code the rule data is keyed by, e.g. a state or country code as loaded in the fixtures."},
+         "channel": {"type": "string", "description": "voice, sms, or voice+sms. Required."},
+         "scope": {"type": "string", "description": "transactional, conversational, or marketing. Required."},
+         "at_time": {"type": "string", "description": "ISO 8601 time to evaluate; defaults to now."}},
         ["channel", "scope"]),
     "number_list": (
         t_number_list,
-        "T0. Every enrolled number with its registration state and "
-        "per-channel/scope sendability matrix. Unenrolled numbers "
-        "do not exist to this family (spec 6).",
+        "List every enrolled number in the Number Registry with "
+        "its registration state and its per-channel/per-scope "
+        "sendability matrix. Use to see what sending identities "
+        "exist; use number_get for one number and "
+        "number_health_report for spam-label and blocking detail. "
+        "Read-only, takes no parameters. Unenrolled numbers do not "
+        "exist to this server family — a number absent here cannot "
+        "send, and send_evaluate denies it by name. Returns "
+        "{numbers, count}.",
         {}, []),
     "number_get": (
         t_number_get,
-        "T0. One enrolled number by number_id or E.164. Unenrolled "
-        "refs are refused as nonexistent.",
-        {"number_ref": {"type": "string"}}, ["number_ref"]),
+        "Fetch one enrolled number by number_id or by E.164 "
+        "number, with registration state and the sendability "
+        "matrix. Use when you know the number's id or E.164; use "
+        "number_list to browse the registry. Read-only. An "
+        "unenrolled reference is an error (NUMBER_NOT_ENROLLED), "
+        "not an empty result — unenrolled numbers do not exist to "
+        "this family. Returns {number}.",
+        {"number_ref": {"type": "string", "description": "A number_id (e.g. 'num_...') or the full E.164 string (e.g. '+15551234567')."}}, ["number_ref"]),
     "number_enroll": (
         t_number_enroll,
-        "T1 operator enrollment (V0 fixture form): register a "
-        "number with capabilities + registration state. Live "
-        "provisioning is an adapter T2 surface at V1.",
-        {"e164": {"type": "string"}, "number_id": {"type": "string"},
-         "platform": {"type": "string"},
-         "account_ref": {"type": "string"},
+        "Enroll a phone number into the Number Registry (operator "
+        "act, fixture form in this build). Use when a number is "
+        "provisioned on a platform and must become sendable "
+        "subject to its registration state; use number_get or "
+        "number_list to read the registry. Mutating, persistent, "
+        "and receipted. This registers the number locally only — "
+        "it provisions nothing with any carrier; live provisioning "
+        "is a separate adapter surface not in this build. e164 "
+        "must be E.164 ('+' followed by digits) and unique in the "
+        "registry; capabilities must be drawn from voice_in, "
+        "voice_out, sms_in, sms_out, mms, fax. Registration "
+        "defaults describe an unregistered number (A2P 10DLC "
+        "unregistered, branded ID not enrolled), which is NOT "
+        "sendable for most scopes until registration data says "
+        "otherwise. Returns {number, receipt_seq} with the public "
+        "number view including its sendability matrix.",
+        {"e164": {"type": "string", "description": "The number in E.164 format, e.g. '+15551234567'. Required; must start with '+' followed by digits only."},
+         "number_id": {"type": "string", "description": "Registry id to assign; defaults to a hash-derived 'num_...' id from the e164."},
+         "platform": {"type": "string", "description": "Platform the number lives on; defaults to 'twilio'."},
+         "account_ref": {"type": "string", "description": "Platform account reference the number belongs to."},
          "capabilities": {"type": "array",
-                          "items": {"type": "string"}},
-         "owner_purpose": {"type": "string"},
-         "registration": {"type": "object"},
+                          "items": {"type": "string"}, "description": "Subset of voice_in, voice_out, sms_in, sms_out, mms, fax."},
+         "owner_purpose": {"type": "string", "description": "What the number is for; defaults to 'support'."},
+         "registration": {"type": "object", "description": "Registration state object: a2p_10dlc {brand_state, campaign_state, linked}, toll_free_verification, stir_shaken, branded_id. Missing pieces default to unregistered states."},
          "spam_labels": {"type": "array",
-                         "items": {"type": "object"}},
-         "status": {"type": "string"}}, ["e164"]),
+                         "items": {"type": "object"}, "description": "Known spam-label observations to seed the number's health record."},
+         "status": {"type": "string", "description": "Registry status; defaults to 'active'."}}, ["e164"]),
     "number_health_report": (
         t_number_health_report,
-        "T0. Spam-label observations + registration state + what "
-        "is send-blocked and why, per number or fleet-wide (spec "
-        "6). Reporting only — no evasion advice exists here.",
-        {"number_id": {"type": "string"}}, []),
+        "Report spam-label observations, registration state, and "
+        "exactly what is send-blocked and why — for one number by "
+        "number_id, or fleet-wide when number_id is omitted. Use "
+        "to diagnose why a number cannot send; use number_get for "
+        "the plain registry record. Read-only and reporting-only: "
+        "this tool never suggests evading spam labels or carrier "
+        "filtering. An unenrolled number_id is an error "
+        "(NUMBER_NOT_ENROLLED). Returns {numbers, count}.",
+        {"number_id": {"type": "string", "description": "Restrict the report to this enrolled number_id; omit for every enrolled number."}}, []),
     "send_evaluate": (
         t_send_evaluate,
-        "The two-gate send evaluation (spec 8): live Consent "
-        "Registry check FIRST, then the Agent Wallet-shaped "
-        "mandate (cap, platform + destination allowlists, "
-        "approval threshold, expiry), plus Number Registry "
-        "sendability. ALLOW returns the consent_record_id the "
-        "send receipt must carry; an unconsented attempt writes "
-        "a violation record and nothing else (spec 8.3). "
-        "Executes nothing.",
-        {"channel": {"type": "string"}, "from_ref": {"type": "string"},
-         "subject": {"type": "string"}, "scope": {"type": "string"},
-         "platform": {"type": "string"},
-         "mandate": {"type": "object"},
-         "estimated_cost": {"type": "number"},
-         "at_time": {"type": "string"},
-         "confirm_token": {"type": "string"}},
+        "Evaluate — never execute — a proposed send through both "
+        "gates in order and return the verdict an adapter must "
+        "obey. Gate order: family kill switch, then a live "
+        "consent_check, then Number Registry enrollment and "
+        "sendability for from_ref, then the mandate (Agent "
+        "Wallet-shaped: expiry, platform allowlist, destination "
+        "allowlist, cost cap, approval threshold). Use before any "
+        "adapter sends; use consent_check alone for a consent-only "
+        "question. This tool sends nothing and places no call — it "
+        "returns a decision only — but it is not side-effect free: "
+        "every evaluation appends a hash-chained receipt, and a "
+        "consent failure additionally writes a violation record. "
+        "Decisions: ALLOW (carries the consent_record_id the "
+        "eventual send receipt must carry, plus send_ref), DENY "
+        "(with the stage that stopped it: kill_switch, consent, "
+        "number, or mandate, and a machine-readable reason), or "
+        "APPROVAL_REQUIRED when estimated_cost exceeds the "
+        "mandate's approval_threshold — re-call with confirm_token "
+        "set to the returned confirm_token_form ('confirm-send-' + "
+        "send_ref) to complete the evaluation. platform defaults "
+        "to 'twilio'; estimated_cost defaults to 0.",
+        {"channel": {"type": "string", "description": "voice, sms, or voice+sms."},
+         "from_ref": {"type": "string", "description": "Sending number: an enrolled number_id or E.164. Unenrolled senders are denied at the number stage."},
+         "subject": {"type": "string", "description": "Recipient identifier, exactly as consent records key it."},
+         "scope": {"type": "string", "description": "transactional, conversational, or marketing."},
+         "platform": {"type": "string", "description": "Sending platform name, checked against the mandate's platform allowlist; defaults to 'twilio'."},
+         "mandate": {"type": "object", "description": "Wallet-shaped mandate object: mandate_id, expires_at (ISO 8601, required inside the object — a mandate without a future expiry is denied), platforms[], destinations[], cap, approval_threshold. Omitting the mandate entirely is a mandate-stage DENY."},
+         "estimated_cost": {"type": "number", "description": "Estimated send cost in the mandate's currency units, compared against cap and approval_threshold; defaults to 0."},
+         "at_time": {"type": "string", "description": "ISO 8601 evaluation time for consent window/DNC and mandate expiry; defaults to now."},
+         "confirm_token": {"type": "string", "description": "For an APPROVAL_REQUIRED verdict, re-call with the exact token the verdict returned ('confirm-send-<send_ref>')."}},
         ["channel", "from_ref", "subject", "scope"]),
     "activity_emit": (
         t_activity_emit,
-        "T1. The emission door into the Customer Graph (spec "
-        "11.2): normalized call/sms/voicemail activity, references "
-        "not media. Blocked attempts emit too (blocked_consent / "
-        "blocked_window are first-class dispositions).",
-        {"kind": {"type": "string"}, "direction": {"type": "string"},
-         "occurred_at": {"type": "string"},
-         "parties": {"type": "object"},
-         "platform_ref": {"type": "object"},
-         "duration_s": {"type": "number"},
-         "disposition": {"type": "string"},
-         "recording_ref": {"type": "string"},
-         "transcript_ref": {"type": "string"},
-         "consent_ref": {"type": "string"},
-         "receipt_ref": {"type": "string"}},
+        "Record one normalized telephony activity event — call, "
+        "sms, or voicemail — as the emission door into the "
+        "Customer Graph. Use when an adapter handled (or tried to "
+        "handle) an activity; blocked attempts emit too, with "
+        "disposition blocked_consent or blocked_window, so the "
+        "record shows refusals as well as completions. Mutating, "
+        "persistent, and receipted. References only, never media: "
+        "pass recording_ref / transcript_ref identifiers, not "
+        "audio or text content. kind must be call, sms, or "
+        "voicemail; direction inbound or outbound; disposition one "
+        "of answered, missed, voicemail, failed, blocked_consent, "
+        "blocked_window. Returns {activity, receipt_seq} with the "
+        "assigned activity_id.",
+        {"kind": {"type": "string", "description": "call, sms, or voicemail."},
+         "direction": {"type": "string", "description": "inbound or outbound."},
+         "occurred_at": {"type": "string", "description": "ISO 8601 time the activity occurred. Required."},
+         "parties": {"type": "object", "description": "Who was involved (from/to identifiers), stored as supplied."},
+         "platform_ref": {"type": "object", "description": "Platform reference for the activity (platform + its native id). Required."},
+         "duration_s": {"type": "number", "description": "Duration in seconds for calls; omit for sms."},
+         "disposition": {"type": "string", "description": "answered, missed, voicemail, failed, blocked_consent, or blocked_window."},
+         "recording_ref": {"type": "string", "description": "Identifier of the recording, if any — a reference, never the media itself."},
+         "transcript_ref": {"type": "string", "description": "Identifier of the transcript, if any — a reference, never the text itself."},
+         "consent_ref": {"type": "string", "description": "consent_record_id the activity relied on, when applicable."},
+         "receipt_ref": {"type": "string", "description": "Related send receipt reference, when applicable."}},
         ["kind", "direction", "occurred_at", "platform_ref",
          "disposition"]),
     "kill_switch_set": (
         t_kill_switch,
-        "T1. The family-wide kill switch: freezes every T2+ send "
-        "evaluation at DENY while T0 history stays readable "
-        "(spec 7). Receipted.",
-        {"engaged": {"type": "boolean"}}, ["engaged"]),
+        "Set the family-wide kill switch for all telephony sends. "
+        "Use to freeze sending across every adapter instantly "
+        "(engaged=true) or to release the freeze (engaged=false). "
+        "Mutating, persistent, and receipted. While engaged, every "
+        "send_evaluate returns DENY at the kill_switch stage; "
+        "read-only tools (consent history, number registry, "
+        "receipts) keep working. The switch does not delete or "
+        "alter consent records or numbers. Returns "
+        "{family_kill_switch, receipt_seq}.",
+        {"engaged": {"type": "boolean", "description": "true engages the freeze; false releases it."}}, ["engaged"]),
     "receipt_list": (
         t_receipt_list,
-        "T0. The family ledger: append-only, hash-chained "
-        "receipts incl. violation records; verifies the chain.",
-        {"limit": {"type": "integer"}}, []),
+        "List the family receipt ledger — append-only, "
+        "hash-chained receipts for consent writes and revocations, "
+        "number enrollments, send evaluations, violation records, "
+        "activity emissions, and kill-switch changes — and report "
+        "whether the chain still verifies. Use to audit what "
+        "happened across the family; there is no per-receipt get "
+        "tool. Read-only. limit returns only the most recent N "
+        "receipts while count always reports the full ledger "
+        "length. Returns {receipts, count, chain_valid}.",
+        {"limit": {"type": "integer", "description": "Return only the most recent N receipts; omit for the whole ledger."}}, []),
 }
 
 # Capability denylist, stated in code (spec 10): this core holds
