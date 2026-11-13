@@ -3,8 +3,10 @@ registry (5.6/6), the two-gate send evaluation (8/8.3), the
 Graph emission door (11.2), and chain integrity."""
 import copy
 import json
+import os
 import sys
 import unittest
+import unittest.mock
 from pathlib import Path
 
 HERE = Path(__file__).parent.parent
@@ -337,6 +339,77 @@ class SendGate(unittest.TestCase):
         out = evaluate(state)
         self.assertEqual(out["decision"], "DENY")
         self.assertEqual(out["reason"], "family_kill_switch_engaged")
+
+
+class KillSwitchOwnerGate(unittest.TestCase):
+    """FND-a091616531: kill_switch_set disengaged the family
+    freeze with no owner token. The switch is owner-gated in
+    both directions; refused attempts are receipted and change
+    nothing."""
+
+    OWNER = "fixture-owner-token"
+
+    def with_owner_env(self):
+        return unittest.mock.patch.dict(
+            os.environ, {srv.OWNER_TOKEN_ENV: self.OWNER})
+
+    def test_tokenless_disengage_refused_and_receipted(self):
+        state = fresh_state()
+        with self.with_owner_env():
+            srv.t_kill_switch(state, {"engaged": True,
+                                      "owner_token": self.OWNER})
+            receipts_before = len(state["receipts"])
+            with self.assertRaises(eng.ToolError) as ctx:
+                srv.t_kill_switch(state, {"engaged": False})
+        self.assertIn("KILL_SWITCH_OWNER_TOKEN_REQUIRED",
+                      str(ctx.exception))
+        self.assertTrue(state["config"]["family_kill_switch"])
+        self.assertEqual(len(state["receipts"]), receipts_before + 1)
+        refusal = state["receipts"][-1]
+        self.assertEqual(refusal["type"], "kill_switch_refused")
+        self.assertEqual(refusal["detail"]["reason"],
+                         "owner_token_missing")
+        self.assertTrue(eng.verify_receipt_chain(state["receipts"]))
+
+    def test_wrong_token_engage_refused(self):
+        state = fresh_state()
+        with self.with_owner_env():
+            with self.assertRaises(eng.ToolError) as ctx:
+                srv.t_kill_switch(state, {"engaged": True,
+                                          "owner_token": "bogus"})
+        self.assertIn("KILL_SWITCH_OWNER_TOKEN_INVALID",
+                      str(ctx.exception))
+        self.assertFalse(state["config"]["family_kill_switch"])
+        self.assertEqual(state["receipts"][-1]["type"],
+                         "kill_switch_refused")
+        self.assertEqual(state["receipts"][-1]["detail"]["reason"],
+                         "owner_token_invalid")
+
+    def test_owner_token_engages_and_disengages(self):
+        state = fresh_state()
+        with self.with_owner_env():
+            out = srv.t_kill_switch(state, {"engaged": True,
+                                            "owner_token": self.OWNER})
+            self.assertTrue(out["family_kill_switch"])
+            write_consent(state)
+            self.assertEqual(evaluate(state)["reason"],
+                             "family_kill_switch_engaged")
+            out = srv.t_kill_switch(state, {"engaged": False,
+                                            "owner_token": self.OWNER})
+            self.assertFalse(out["family_kill_switch"])
+        self.assertNotIn(self.OWNER, json.dumps(state["receipts"]))
+
+    def test_unconfigured_server_refuses_every_change(self):
+        state = fresh_state()
+        with unittest.mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaises(eng.ToolError) as ctx:
+                srv.t_kill_switch(state, {"engaged": True,
+                                          "owner_token": self.OWNER})
+        self.assertIn("KILL_SWITCH_OWNER_TOKEN_NOT_CONFIGURED",
+                      str(ctx.exception))
+        self.assertFalse(state["config"]["family_kill_switch"])
+        self.assertEqual(state["receipts"][-1]["detail"]["reason"],
+                         "owner_token_not_configured")
 
 
 class ActivityEmit(unittest.TestCase):

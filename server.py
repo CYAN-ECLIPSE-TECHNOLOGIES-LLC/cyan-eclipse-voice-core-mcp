@@ -30,7 +30,12 @@ sections 5-8):
     mandate; a receipt carrying a consent_record_id is writable
     only when consent ALLOWs, otherwise the attempt produces a
     violation record and nothing else (spec 8.3);
-  * the family receipt ledger — append-only, hash-chained.
+  * the family receipt ledger — append-only, hash-chained;
+  * the family kill switch — owner-gated in both directions:
+    kill_switch_set changes state only for a call carrying the
+    owner credential (env ECLIPSE_VOICE_CORE_OWNER_TOKEN, never
+    persisted); refused attempts are receipted as
+    kill_switch_refused and change nothing (FND-a091616531).
 
 ADAPTER SEAM (V0 fixture form, stated plainly): adapters import
 core_engine from this directory and evaluate against the SHARED
@@ -48,6 +53,7 @@ Transport: MCP over stdio (newline-delimited JSON-RPC 2.0),
 stdlib only. State: $ECLIPSE_VOICE_CORE_STATE or
 ./data/state.json beside this file, seeded from fixtures.json.
 """
+import hmac
 import json
 import os
 import sys
@@ -62,6 +68,11 @@ from core_engine import ToolError  # noqa: E402
 STATE_PATH = Path(os.environ.get(
     "ECLIPSE_VOICE_CORE_STATE", HERE / "data" / "state.json"))
 FIXTURES_PATH = HERE / "fixtures.json"
+
+# The family kill switch is owner-gated (FND-a091616531): the
+# owner credential lives only in the server process environment
+# under this name — never in state, fixtures, or receipts.
+OWNER_TOKEN_ENV = "ECLIPSE_VOICE_CORE_OWNER_TOKEN"
 
 
 def load_state() -> dict:
@@ -154,9 +165,39 @@ def t_activity_emit(state, args):
 
 def t_kill_switch(state, args):
     engaged = bool(args.get("engaged"))
+    # Owner gate (FND-a091616531): engaging and disengaging alike
+    # require the owner credential. A freeze anyone can lift is
+    # not a freeze; a freeze no one can set in an emergency is
+    # its own hazard — the owner is the actor for both. Refused
+    # attempts are receipted and change nothing.
+    expected = os.environ.get(OWNER_TOKEN_ENV, "")
+    provided = args.get("owner_token")
+    if not expected:
+        eng.emit_receipt(state, "kill_switch_refused", {
+            "engaged": engaged, "scope": "family",
+            "reason": "owner_token_not_configured"})
+        raise ToolError(
+            "KILL_SWITCH_OWNER_TOKEN_NOT_CONFIGURED: this server "
+            f"has no owner credential in ${OWNER_TOKEN_ENV}; "
+            "kill-switch changes are refused until one is set")
+    if not isinstance(provided, str) or not provided:
+        eng.emit_receipt(state, "kill_switch_refused", {
+            "engaged": engaged, "scope": "family",
+            "reason": "owner_token_missing"})
+        raise ToolError(
+            "KILL_SWITCH_OWNER_TOKEN_REQUIRED: kill_switch_set "
+            "requires the owner credential (owner_token)")
+    if not hmac.compare_digest(provided, expected):
+        eng.emit_receipt(state, "kill_switch_refused", {
+            "engaged": engaged, "scope": "family",
+            "reason": "owner_token_invalid"})
+        raise ToolError(
+            "KILL_SWITCH_OWNER_TOKEN_INVALID: the supplied "
+            "owner_token does not match the owner credential")
     state["config"]["family_kill_switch"] = engaged
     receipt = eng.emit_receipt(state, "kill_switch_set",
-                               {"engaged": engaged, "scope": "family"})
+                               {"engaged": engaged, "scope": "family",
+                                "actor": "owner"})
     return {"family_kill_switch": engaged,
             "receipt_seq": receipt["seq"]}
 
@@ -420,13 +461,21 @@ TOOLS = {
         "Set the family-wide kill switch for all telephony sends. "
         "Use to freeze sending across every adapter instantly "
         "(engaged=true) or to release the freeze (engaged=false). "
-        "Mutating, persistent, and receipted. While engaged, every "
-        "send_evaluate returns DENY at the kill_switch stage; "
-        "read-only tools (consent history, number registry, "
-        "receipts) keep working. The switch does not delete or "
-        "alter consent records or numbers. Returns "
+        "Owner-gated: every call, engaging or disengaging, must "
+        "carry owner_token matching the owner credential the "
+        "server process holds (env ECLIPSE_VOICE_CORE_OWNER_TOKEN); "
+        "a call with no owner_token, a wrong one, or any call "
+        "while no credential is configured is refused with a "
+        "KILL_SWITCH_OWNER_TOKEN error, receipted as "
+        "kill_switch_refused, and changes nothing. Mutating, "
+        "persistent, and receipted on success. While engaged, "
+        "every send_evaluate returns DENY at the kill_switch "
+        "stage; read-only tools (consent history, number "
+        "registry, receipts) keep working. The switch does not "
+        "delete or alter consent records or numbers. Returns "
         "{family_kill_switch, receipt_seq}.",
-        {"engaged": {"type": "boolean", "description": "true engages the freeze; false releases it."}}, ["engaged"]),
+        {"engaged": {"type": "boolean", "description": "true engages the freeze; false releases it."},
+         "owner_token": {"type": "string", "description": "The owner credential for the kill switch, checked against the server process's ECLIPSE_VOICE_CORE_OWNER_TOKEN. Required for every call, engaging or disengaging; never stored in state or receipts."}}, ["engaged", "owner_token"]),
     "receipt_list": (
         t_receipt_list,
         "List the family receipt ledger — append-only, "

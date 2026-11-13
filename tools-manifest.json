@@ -2,7 +2,7 @@
  "app": "Cyan Eclipse Voice (Voice Core)",
  "connector": "custom.voice",
  "manifest": "tools-manifest/1",
- "scope_of_record": "SCOPE-MATRIX row 4 of ~/workspace/cyan-eclipse/mcp-connector-commission-20261111/SCOPE-MATRIX.md — served reads + shadow pre-flight granted; the five consent/registry/kill-switch writes withheld (human acts / ungranted writes)",
+ "scope_of_record": "SCOPE-MATRIX row 4 of ~/workspace/cyan-eclipse/mcp-connector-commission-20261111/SCOPE-MATRIX.md \u2014 served reads + shadow pre-flight granted; the five consent/registry/kill-switch writes withheld (human acts / ungranted writes)",
  "server": {
   "entry": "server.py (python3, stdlib only)",
   "home": "Shard E /home/witness/app-family/eclipse-voice-core-mcp (maintenance home; GitHub repo CYAN-ECLIPSE-TECHNOLOGIES-LLC/eclipse-voice-core-mcp)",
@@ -12,8 +12,8 @@
  },
  "tools": [
   {
-   "class": "WRITE — NOT GRANTED (SCOPE-MATRIX row 4)",
-   "fences": "WRITE — the emission door into the Customer Graph (spec 11.2); SCOPE-MATRIX row 4 grants reads + shadow pre-flight only",
+   "class": "WRITE \u2014 NOT GRANTED (SCOPE-MATRIX row 4)",
+   "fences": "WRITE \u2014 the emission door into the Customer Graph (spec 11.2); SCOPE-MATRIX row 4 grants reads + shadow pre-flight only",
    "granted": false,
    "inputs": "kind (required); direction (required); occurred_at (required); parties (optional); platform_ref (required); duration_s (optional); disposition (required); recording_ref (optional); transcript_ref (optional); consent_ref (optional); receipt_ref (optional)",
    "name": "activity_emit",
@@ -36,16 +36,16 @@
    "outputs": "The full consent trail for a subject: records with their append-only status history"
   },
   {
-   "class": "WRITE — NOT GRANTED (SCOPE-MATRIX row 4)",
-   "fences": "WRITE — consent-signing: writing a consent record is a human act (VOI-MCP-SEC-1/2 fence); not granted by SCOPE-MATRIX row 4",
+   "class": "WRITE \u2014 NOT GRANTED (SCOPE-MATRIX row 4)",
+   "fences": "WRITE \u2014 consent-signing: writing a consent record is a human act (VOI-MCP-SEC-1/2 fence); not granted by SCOPE-MATRIX row 4",
    "granted": false,
    "inputs": "subject (required); channel (required); scope (required); purpose (required); source (required); captured_at (required); provenance (required); method_detail (optional); jurisdiction_hint (optional); recorded_by (optional)",
    "name": "consent_record_write",
    "outputs": "Not exposed through this connector."
   },
   {
-   "class": "WRITE — NOT GRANTED (SCOPE-MATRIX row 4)",
-   "fences": "WRITE — one-way revocation of consent records; a principal act, not granted by SCOPE-MATRIX row 4 (reads + shadow pre-flight only)",
+   "class": "WRITE \u2014 NOT GRANTED (SCOPE-MATRIX row 4)",
+   "fences": "WRITE \u2014 one-way revocation of consent records; a principal act, not granted by SCOPE-MATRIX row 4 (reads + shadow pre-flight only)",
    "granted": false,
    "inputs": "consent_id (optional); subject (optional); revocation_source (required)",
    "name": "consent_revoke",
@@ -60,16 +60,16 @@
    "outputs": "DNC overlay datasets (versions, provenance, freshness); optionally one subject's match state"
   },
   {
-   "class": "WRITE — NOT GRANTED (SCOPE-MATRIX row 4)",
-   "fences": "WRITE — the family kill switch is a human act (VOI-MCP-SEC-1/2 fence); not granted by SCOPE-MATRIX row 4",
+   "class": "WRITE \u2014 NOT GRANTED (SCOPE-MATRIX row 4)",
+   "fences": "WRITE \u2014 the family kill switch is a human act (VOI-MCP-SEC-1/2 fence); not granted by SCOPE-MATRIX row 4",
    "granted": false,
-   "inputs": "engaged (required)",
+   "inputs": "engaged (required); owner_token (required \u2014 the owner credential, FND-a091616531)",
    "name": "kill_switch_set",
    "outputs": "Not exposed through this connector."
   },
   {
-   "class": "WRITE — NOT GRANTED (SCOPE-MATRIX row 4)",
-   "fences": "WRITE — operator enrollment into the Number Registry; not granted by SCOPE-MATRIX row 4 (reads + shadow pre-flight only)",
+   "class": "WRITE \u2014 NOT GRANTED (SCOPE-MATRIX row 4)",
+   "fences": "WRITE \u2014 operator enrollment into the Number Registry; not granted by SCOPE-MATRIX row 4 (reads + shadow pre-flight only)",
    "granted": false,
    "inputs": "e164 (required); number_id (optional); platform (optional); account_ref (optional); capabilities (optional); owner_purpose (optional); registration (optional); spam_labels (optional); status (optional)",
    "name": "number_enroll",
@@ -85,11 +85,11 @@
   },
   {
    "class": "T0",
-   "fences": "Reporting only — no evasion advice exists in this surface.",
+   "fences": "Reporting only \u2014 no evasion advice exists in this surface.",
    "granted": true,
    "inputs": "number_id (optional)",
    "name": "number_health_report",
-   "outputs": "Spam-label observations, registration state, and what is send-blocked and why — per number or fleet-wide"
+   "outputs": "Spam-label observations, registration state, and what is send-blocked and why \u2014 per number or fleet-wide"
   },
   {
    "class": "T0",
@@ -109,7 +109,7 @@
   },
   {
    "class": "T1",
-   "fences": "Shadow pre-flight (T1): evaluates the two gates and executes NOTHING — no send, no dial. An unconsented attempt writes a violation record server-side and nothing else (spec 8.3).",
+   "fences": "Shadow pre-flight (T1): evaluates the two gates and executes NOTHING \u2014 no send, no dial. An unconsented attempt writes a violation record server-side and nothing else (spec 8.3).",
    "granted": true,
    "inputs": "channel (required); from_ref (required); subject (required); scope (required); platform (optional); mandate (optional); estimated_cost (optional); at_time (optional); confirm_token (optional)",
    "name": "send_evaluate",
